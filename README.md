@@ -7,6 +7,8 @@ back as a replacement PowerShell shell.
 This is a standalone integration. It does not change your PowerShell profile,
 OMP `config.yml`, or other mods.
 
+[Screenshot and rebuild recipe](RECIPE.md)
+
 ## What it does
 
 - An OMP extension publishes the current session identity to Herdr with one
