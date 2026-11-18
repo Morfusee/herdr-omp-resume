@@ -1,0 +1,23 @@
+# Runtime session registry and Herdr shared state
+omp-sessions.json
+shared.json
+shared.json.tmp.*
+
+# Secrets and logs
+.env
+.env.*
+*.log
+logs/
+
+# Dependencies
+node_modules/
+
+# Herdr-generated mod declarations and editor config
+gpui-kit.d.ts
+herdr.d.ts
+jsconfig.json
+
+# Test cache and coverage
+.bun/
+.cache/
+coverage/
