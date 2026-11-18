@@ -1,6 +1,6 @@
 # OMP Resume
 
-A narrow strip at the bottom of Herdr shows how many OMP conversations are registered. If Herdr replaces a lost terminal with a PowerShell prompt, the mod can resume the saved conversation in that pane. Live agents and closed panes stay untouched.
+Resume OMP agents in Herdr on Windows.
 
 ![OMP Resume](preview.png)
 
