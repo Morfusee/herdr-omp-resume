@@ -1,6 +1,6 @@
 # Command Runner
 
-Send saved commands to a shell or an idle agent without switching tabs. Select a command, space, and tab for each target. The row shows whether the text will run in a shell or go to an agent. Use **Add target** to prepare a batch and **Saved commands** to manage the list.
+Send saved commands to a shell or a running agent without switching tabs. Select a command, space, and tab for each target. The row shows whether the text will run in a shell or go to an agent. Use **Add target** to prepare a batch and **Saved commands** to manage the list.
 
 **Before installing:** This mod reads live Herdr pane and process metadata and reads the target terminal screen to recognize a prompt. It runs read-only `git rev-parse` in workspace folders, locally or on the space's machine. Clicking **Run** can send one Ctrl+C to a recognized development server before submitting the saved command. It does not make direct network requests, but it can use Herdr's existing remote connections, and saved commands run with the target shell's permissions. Saved command text is persistent Herdr shared state visible to other mods. Do not save secrets.
 
@@ -23,7 +23,8 @@ Use Herdr Desktop 0.1.16 (the API version this mod targets) with its bundled `wo
 ## What Run does
 
 - To restart OMP, save `/restart`, select the tab (and pane, if split) running OMP, check that the row says **Send to OMP**, then click **Run**. An agent receives the text as input; it is not executed by an underlying shell. **Sent to OMP** acknowledges delivery, not completion of the restart.
-- Agent input uses `hc send --if idle`. The core must report `idle`, not just show an idle badge in the app. OMP often reports `done` after a turn; in that state, enter `/restart` directly in its composer. Run never interrupts an agent, forces an approval, or falls back to sending `/restart` to a shell.
+- `done` means the last turn finished, not that the agent exited. You can send commands after a turn or while the agent is working. The runner checks that the selected agent still owns the foreground, then calls `hc send` once. If Herdr refuses because a permission dialog is open, resolve it in the tab before trying again. The runner never forces an approval or retries a send.
+- `hc send` addresses a terminal, not a PID. If you launched the agent inside a shell, don’t exit or replace it while a send is pending: the foreground check happens before Herdr writes.
 - Run checks each target's live address, pane membership, launch identity, and foreground process. It accepts supported interactive shells (Bash, Dash, Fish, Ksh, Sh, Zsh, PowerShell, and Cmd) only with a prompt it recognizes. Custom prompts, drafts, and unknown processes may be refused.
 - The only interrupt candidates are Python's `http.server` and recognized `next dev` invocations. A generic `pnpm dev` process is not enough. After one Ctrl+C, Run waits up to five seconds for the original shell and a clean prompt. It does not escalate or send to a replacement process.
 - A batch can partially succeed. Failures appear on their own rows, accepted rows are not sent again on the next Run, and the mod does not automatically retry failed writes. If delivery is uncertain, inspect the terminal before retrying. Review every target and command: the checks are not a sandbox.

@@ -6,7 +6,7 @@ Two mods for the [Herdr desktop app](https://herdr.dev/). Install either one ind
 
 [![Command Runner: a saved command and searchable space and tab selectors](command-runner/preview.png)](command-runner/)
 
-Send saved shell commands to selected terminal tabs across spaces without switching your current tab. Add one row per destination, then run the batch. [Install and use Command Runner](command-runner/README.md) · [Rebuild recipe](command-runner/RECIPE.md)
+Send saved commands to shells or running agents across spaces without switching tabs. Add one row per destination, then run the batch. [Install and use Command Runner](command-runner/README.md) · [Rebuild recipe](command-runner/RECIPE.md)
 
 ```text
 Read the installed Herdr guide at ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/Morfusee/herdr-mods/tree/main/command-runner

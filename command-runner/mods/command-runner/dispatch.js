@@ -84,6 +84,16 @@ function cleanPrompt(text, shell, cwd) {
   return /^(?:[\w.-]+@[\w.-]+(?::[^\s]+)?|(?:ba|z|da|k)?sh-[\d.]+)?[$#]$/u.test(line);
 }
 
+function errorText(text) {
+  try {
+    const message = JSON.parse(text)?.error?.message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  } catch {
+    // Not an hc error envelope; show it as the core wrote it.
+  }
+  return typeof text === "string" ? text.trim() : "";
+}
+
 async function invoke(hc, args) {
   const command = `hc ${args[0]}`;
   let result;
@@ -94,7 +104,7 @@ async function invoke(hc, args) {
   }
   if (result.code !== 0)
     throw new Error(
-      `${command}: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`,
+      `${command}: ${errorText(result.stderr || result.stdout) || `exit ${result.code}`}`,
     );
   try {
     const reply = JSON.parse(result.stdout);
@@ -125,6 +135,16 @@ function sameForeground(a, b) {
   return a.pid === b.pid && sameArgs(a.argv, b.argv);
 }
 
+export function isRunningAgent(terminal, agent) {
+  return (
+    terminal?.state === "live" &&
+    terminal.reported === true &&
+    typeof agent === "string" &&
+    terminal.report?.app === agent &&
+    agentForeground(terminal.foreground, agent)
+  );
+}
+
 export async function dispatch(
   { space, tab, terminal, command, agent },
   { hc, spaces, panes, terminals, delay },
@@ -138,7 +158,7 @@ export async function dispatch(
   if (toAgent && (typeof agent !== "string" || !agent.trim()))
     throw new Error("Select a recognized agent.");
   if (!toAgent && command.trim() === "/restart")
-    throw new Error("Select an idle agent to send /restart.");
+    throw new Error("Select a running agent to send /restart.");
 
   const hasLabels = (item, prefix) =>
     item.labels?.["herdr.space"] === space.slice(prefix.length) &&
@@ -171,16 +191,10 @@ export async function dispatch(
     )
       throw new Error("The selected terminal is no longer live.");
     if (toAgent) {
-      if (pane.app !== agent || live.report?.app !== agent || live.reported !== true) {
-        throw new Error("The selected terminal no longer reports the selected agent.");
-      }
-      if (pane.status !== "idle" || live.status !== "idle" || live.report.state !== "idle") {
-        throw new Error("The selected agent is not idle.");
-      }
+      if (pane.app !== agent || !isRunningAgent(live, agent))
+        throw new Error("The selected agent is no longer in the foreground.");
       if (!hasLabels(live, prefix))
         throw new Error("The terminal's address or membership changed.");
-      if (!agentForeground(live.foreground, agent))
-        throw new Error("The selected agent is not in the foreground.");
     } else if (
       pane.app != null ||
       pane.status != null ||
@@ -231,8 +245,7 @@ export async function dispatch(
       if (fresh.reported !== true || fresh.status?.app !== agent) {
         throw new Error("The terminal no longer reports the selected agent.");
       }
-      if (fresh.status.state !== "idle") throw new Error("The selected agent is not idle.");
-      // In particular, Windows can keep an idle report after the agent exits into its shell.
+      // In particular, Windows can keep a stale report after the agent exits into its shell.
       if (
         !agentForeground(fresh.foreground, agent) ||
         !sameForeground(foreground, current.live.foreground) ||
@@ -270,13 +283,9 @@ export async function dispatch(
       throw new Error(`hc ${args[0]} did not confirm delivery.`);
   }
 
-  if (toAgent) {
-    await inspect();
-    return write(["send", "--json", "--if", "idle", "--", terminal, command]);
-  }
-
   const send = () => write(["send", "--json", "--", terminal, command]);
   const fresh = await inspect();
+  if (toAgent) return send();
   if (originalShell(fresh, shell)) {
     if (!(await promptReady()))
       throw new Error(

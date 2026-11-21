@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dispatch } from "../mods/command-runner/dispatch.js";
+import { dispatch, isRunningAgent } from "../mods/command-runner/dispatch.js";
 
 const python = {
   pid: 43,
@@ -264,19 +264,52 @@ test("surfaces core failures or missing acknowledgments and never retries", asyn
   assert.deepEqual(writes(interrupted), ["keys"]);
 });
 
-test("sends literal /restart once to the selected idle local or remote agent", async () => {
+test("sends plain input once to a running agent whatever its turn state", async () => {
+  const states = [
+    { pane: "idle", live: "done", fresh: "done" },
+    { pane: "working", live: "working", fresh: "working" },
+    { pane: "idle", live: "error", fresh: "error" },
+  ];
   for (const machine of [null, "work"]) {
-    const f = agentFixture(machine);
-    assert.equal(await dispatch(f.row, f.deps), undefined);
-    assert.deepEqual(f.calls, [
-      ["get", "--json", "--", f.row.terminal],
-      ["send", "--json", "--if", "idle", "--", f.row.terminal, "/restart"],
-    ]);
-    assert.deepEqual(f.delays, []);
+    for (const state of states) {
+      const f = agentFixture(machine);
+      f.visible[0].status = state.pane;
+      f.live.status = state.live;
+      f.live.report.state = state.live;
+      f.fresh.status.state = state.fresh;
+      assert.equal(await dispatch(f.row, f.deps), undefined);
+      assert.deepEqual(f.calls, [
+        ["get", "--json", "--", f.row.terminal],
+        ["send", "--json", "--", f.row.terminal, "/restart"],
+      ]);
+      assert.deepEqual(f.delays, []);
+    }
   }
 });
 
-test("requires every view of the agent to agree on the selected app and idle state", async () => {
+test("surfaces a native blocked refusal once without forcing or retrying", async () => {
+  const f = agentFixture("work");
+  f.visible[0].status = "blocked";
+  f.live.status = "blocked";
+  f.live.report.state = "blocked";
+  f.fresh.status.state = "blocked";
+  f.replies.send = () => ({
+    code: 9,
+    stdout: "",
+    stderr: JSON.stringify({
+      error: { kind: "blocked", message: "blocked on an approval prompt" },
+    }),
+  });
+  await assert.rejects(dispatch(f.row, f.deps), /blocked on an approval prompt/);
+  assert.deepEqual(f.calls, [
+    ["get", "--json", "--", "work/t7"],
+    ["send", "--json", "--", "work/t7", "/restart"],
+  ]);
+  assert.ok(!f.calls.some((args) => args.includes("--force") || args.includes("--if")));
+  assert.deepEqual(f.delays, []);
+});
+
+test("requires every view of the agent to agree on the selected app", async () => {
   for (const [change, error] of [
     [
       (f) => {
@@ -298,24 +331,6 @@ test("requires every view of the agent to agree on the selected app and idle sta
     ],
     [
       (f) => {
-        f.visible[0].status = "blocked";
-      },
-      /not idle/,
-    ],
-    [
-      (f) => {
-        f.live.status = "working";
-      },
-      /not idle/,
-    ],
-    [
-      (f) => {
-        f.live.report.state = "done";
-      },
-      /not idle/,
-    ],
-    [
-      (f) => {
         f.live.report.app = "codex";
       },
       /selected agent/,
@@ -331,24 +346,6 @@ test("requires every view of the agent to agree on the selected app and idle sta
         f.fresh.status.app = "codex";
       },
       /selected agent/,
-    ],
-    [
-      (f) => {
-        f.fresh.status.state = "blocked";
-      },
-      /not idle/,
-    ],
-    [
-      (f) => {
-        f.fresh.status.state = "working";
-      },
-      /not idle/,
-    ],
-    [
-      (f) => {
-        f.fresh.status.state = "unknown";
-      },
-      /not idle/,
     ],
     [
       (f) => {
@@ -368,6 +365,40 @@ test("requires every view of the agent to agree on the selected app and idle sta
     await assert.rejects(dispatch(f.row, f.deps), error);
     assert.deepEqual(writes(f), []);
   }
+});
+
+test("isRunningAgent accepts any live reported turn and rejects stale windows", () => {
+  const terminal = {
+    state: "live",
+    reported: true,
+    report: { app: "omp", state: "idle" },
+    foreground: { pid: 43, name: "omp.exe", argv: ["C:\\tools\\omp.exe"] },
+  };
+  for (const state of ["idle", "done", "working", "error", "blocked"]) {
+    assert.equal(isRunningAgent({ ...terminal, report: { app: "omp", state } }, "omp"), true);
+  }
+  assert.equal(isRunningAgent({ ...terminal, state: "finished" }, "omp"), false);
+  assert.equal(isRunningAgent({ ...terminal, reported: false }, "omp"), false);
+  assert.equal(
+    isRunningAgent({ ...terminal, report: { app: "codex", state: "idle" } }, "omp"),
+    false,
+  );
+  assert.equal(
+    isRunningAgent(
+      { ...terminal, foreground: { pid: 42, name: "pwsh.exe", argv: ["pwsh.exe"] } },
+      "omp",
+    ),
+    false,
+  );
+  assert.equal(
+    isRunningAgent(
+      { ...terminal, foreground: { pid: 43, name: "omp.exe", argv: ["pwsh.exe"] } },
+      "omp",
+    ),
+    false,
+  );
+  assert.equal(isRunningAgent({ ...terminal, foreground: null }, "omp"), false);
+  assert.equal(isRunningAgent(null, "omp"), false);
 });
 
 test("refuses stale agent reports when the foreground is a shell or unknown process", async () => {
@@ -411,12 +442,6 @@ test("rechecks selected pane, machine, labels, launch, and foreground after requ
     ],
     [
       (f) => {
-        f.visible[0].status = "working";
-      },
-      /not idle/,
-    ],
-    [
-      (f) => {
         f.space.machine = "other";
       },
       /machine address/,
@@ -438,6 +463,18 @@ test("rechecks selected pane, machine, labels, launch, and foreground after requ
         f.live.labels = { ...f.live.labels, "herdr.space": "sp2" };
       },
       /membership changed/,
+    ],
+    [
+      (f) => {
+        f.live.state = "finished";
+      },
+      /no longer live/,
+    ],
+    [
+      (f) => {
+        f.live.address = "work/t8";
+      },
+      /no longer live/,
     ],
     [
       (f) => {
@@ -491,7 +528,7 @@ test("never dispatches a shell selection through the agent path or sends /restar
     const shell = fixture();
     await assert.rejects(
       dispatch({ ...shell.row, command: "/restart", agent }, shell.deps),
-      /Select an idle agent/,
+      /Select a running agent/,
     );
     assert.deepEqual(shell.calls, []);
 
@@ -511,8 +548,8 @@ test("surfaces a guarded send refusal or uncertain delivery without retrying", a
       /program blocked/,
     ],
     [
-      () => ({ code: 10, stdout: "", stderr: '{"error":{"message":"expected idle"}}' }),
-      /expected idle/,
+      () => ({ code: 11, stdout: "", stderr: '{"error":{"message":"terminal finished"}}' }),
+      /terminal finished/,
     ],
     [
       () => {
@@ -526,15 +563,8 @@ test("surfaces a guarded send refusal or uncertain delivery without retrying", a
     f.replies.send = reply;
     await assert.rejects(dispatch(f.row, f.deps), error);
     assert.deepEqual(operations(f), ["get", "send"]);
-    assert.deepEqual(f.calls[1], [
-      "send",
-      "--json",
-      "--if",
-      "idle",
-      "--",
-      f.row.terminal,
-      "/restart",
-    ]);
+    assert.deepEqual(f.calls[1], ["send", "--json", "--", f.row.terminal, "/restart"]);
+    assert.ok(!f.calls[1].includes("--force") && !f.calls[1].includes("--if"));
     assert.deepEqual(f.delays, []);
   }
 });

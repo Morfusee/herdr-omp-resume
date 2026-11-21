@@ -14,7 +14,7 @@ import {
   terminals,
   theme,
 } from "herdr";
-import { dispatch } from "./dispatch.js";
+import { dispatch, isRunningAgent } from "./dispatch.js";
 import { groupSpaceOptions, readSpaceRepo, spaceLocations } from "./space-options.js";
 
 const KEY = "command-runner.commands";
@@ -203,15 +203,11 @@ export default class CommandRunner extends View {
     if (!pane) return r.terminal ? "Terminal closed. Choose another terminal." : missing;
     if ((pane.app ?? null) !== r.agent) return "The program changed. Select this target again.";
     if (r.agent) {
-      const report = terminals().find((t) => t.address === r.terminal)?.report;
-      if (report?.app !== r.agent) return "Agent identity unavailable. Check the target.";
-      const state = report.state === "idle" ? pane.status : report.state;
-      if (state === "done")
-        return `${agentLabel(r.agent)} reports done, not idle. Enter the command in the agent directly.`;
-      if (state !== "idle")
-        return `${agentLabel(r.agent)} reports ${state ?? "unknown"}. Sending requires idle.`;
+      const terminal = terminals().find((t) => t.address === r.terminal);
+      if (!isRunningAgent(terminal, r.agent))
+        return `Can't verify ${agentLabel(r.agent)} is running in this terminal.`;
     }
-    if (!r.agent && r.command === "/restart") return "Select an idle agent for /restart.";
+    if (!r.agent && r.command === "/restart") return "Select a running agent for /restart.";
     if (this.rows.some((other) => other !== r && other.terminal === r.terminal))
       return "This terminal is already in the batch.";
     return "";
