@@ -26,16 +26,16 @@ Below the existing Herdr layout, dock one full-width, 28 px bottom strip. Use th
 
 ## Watch out
 
-- Windows, Herdr with the `hc` CLI, Node.js, and OMP with the interactive session APIs are required. PowerShell 7 runs the optional installer. Only local PowerShell replacement shells are recovery targets. A normal app reopen does nothing to agents still running.
-- Copying `mods/omp-resume/` installs only the Herdr half. Use the [installer](README.md#install) to copy the hook too. An already-open OMP needs one manual `/restart` to load it. Do not add another extension, modify the PowerShell profile, or ship a `layouts/` folder.
+- Windows, Herdr with the `hc` CLI, Node.js, and OMP with the interactive session APIs are required. The installer requires PowerShell 7. Only local PowerShell replacement shells are recovery targets. A normal app reopen does nothing to agents still running.
+- From the collection checkout, follow the [package install steps](README.md#install) in `omp-resume/`. Copying `mods/omp-resume/` alone installs only the Herdr half. An already-open OMP needs one manual `/restart` to load the hook. Do not add another extension, modify the PowerShell profile, or ship a `layouts/` folder.
 - If the selected layout has no footer, clone the layout and add one 28 px bottom block with `content: { mod: "omp-resume" }`. The clean preview window needed this step. Do not modify a shipped layout.
 - The mod reads and writes the registry outside its own folder and checks for the saved session file. It runs local `node` and `hc` commands. The hook runs `hc label`. Neither component makes network requests. The registry holds private paths and IDs; never distribute it.
 - Do not infer an ID from a session file lock, a process handle, or recent files. An idle restart may have no writer lock. A conversation that OMP has not yet saved cannot be recovered. Use `--resume`, not `--restore`, and do not treat `/exit` as a lost process.
-- Keep the upstream MIT notice for the lifecycle approach and PowerShell quoting adapted from [Revive for Windows](https://github.com/RAF1337/herdr-revive-win).
+- Keep the [bundled MIT notice](mods/omp-resume/LICENSE) for the lifecycle approach and PowerShell quoting adapted from [Revive for Windows](https://github.com/RAF1337/herdr-revive-win).
 
 ## Done when
 
-- `herdr-app check mods/omp-resume` passes without file writes or process launches. In a real Herdr window, the footer fits in one row and shows the active registry count. Service mode draws no second counter.
+- From the `omp-resume` package folder, `herdr-app check ./mods/omp-resume` passes without file writes or process launches. In a real Herdr window, the footer fits in one row and shows the active registry count. Service mode draws no second counter.
 - A main interactive OMP registers once. Two idle restarts keep the same ID and command. Switching conversation replaces its entry. Exiting or closing the pane removes it. A nested or headless session cannot register over it.
 - On startup a saved conversation resumes once in its retained replacement PowerShell pane. An open agent, busy shell, ordinary shell return, closed pane, or missing file receives no command.
 - An invalid registry or altered command causes an error without overriding the file. Clicking the count after correcting the file refreshes the count. A clean install and an unchanged reinstall preserve unrelated config and runtime data.

@@ -4,7 +4,7 @@
 Installs the Herdr omp-resume mod and its self-contained OMP hook.
 
 .DESCRIPTION
-Copies the five owned files from ./mods/omp-resume into
+Copies the five owned files from mods/omp-resume beside this script into
 <AppHome>/mods/omp-resume and copies the hook to
 <OmpAgentHome>/extensions/herdr-omp-resume.ts as a regular file. Runtime state,
 layouts, other mods and other extensions are never touched. Existing generated
@@ -21,10 +21,14 @@ OMP_PROFILE or PI_CODING_AGENT_DIR is set, so the hook is not installed into an
 unexpected profile.
 
 .EXAMPLE
-pwsh -NoProfile -File ./install.ps1
+pwsh -NoProfile -File ./omp-resume/install.ps1
+
+Run from the collection checkout root.
 
 .EXAMPLE
 pwsh -NoProfile -File ./install.ps1 -AppHome "$HOME/.config/herdr-app" -OmpAgentHome "$HOME/.omp/agent" -WhatIf
+
+Run from the omp-resume package folder.
 #>
 #Requires -Version 7.0
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -35,7 +39,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:RepoRoot = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($PSScriptRoot))
 $script:PathComparison = if ($IsWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
 $script:OwnedFiles = @('main.js', 'registry.js', 'mod.json', 'LICENSE', 'omp/revive.ts')
 
@@ -156,12 +159,12 @@ try {
   $AppHome = Resolve-InstallPath -Path $AppHome -Name 'AppHome'
   $OmpAgentHome = Resolve-InstallPath -Path $OmpAgentHome -Name 'OmpAgentHome'
 
-  $sourceRoot = [IO.Path]::GetFullPath((Join-Path $script:RepoRoot 'mods/omp-resume'))
+  $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'mods/omp-resume'))
   $sources = @{}
   foreach ($relative in $script:OwnedFiles) {
     $source = [IO.Path]::GetFullPath((Join-Path $sourceRoot $relative))
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-      throw "Missing required source file: '$source'. Run install.ps1 from a complete checkout of this repository."
+      throw "Missing required source file: '$source'. Keep install.ps1 and mods/omp-resume together in the omp-resume package."
     }
     $sources[$relative] = $source
   }
@@ -170,9 +173,10 @@ try {
   $hookTarget = [IO.Path]::GetFullPath((Join-Path $OmpAgentHome 'extensions/herdr-omp-resume.ts'))
   $extensionTarget = [IO.Path]::GetDirectoryName($hookTarget)
 
+  $checkoutRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
   foreach ($target in @($modTarget, $hookTarget)) {
-    if ((Test-PathEqual $target $script:RepoRoot) -or (Test-PathWithin $target $script:RepoRoot)) {
-      throw "Refusing to write '$target' inside this repository. Choose an AppHome and OmpAgentHome outside '$script:RepoRoot'."
+    if ((Test-PathEqual $target $checkoutRoot) -or (Test-PathWithin $target $checkoutRoot)) {
+      throw "Refusing to write '$target' inside the collection checkout. Choose an AppHome and OmpAgentHome outside '$checkoutRoot'."
     }
   }
 

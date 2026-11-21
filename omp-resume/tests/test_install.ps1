@@ -2,9 +2,10 @@
 #Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 
-$repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$installer = Join-Path $repo 'install.ps1'
-$sourceRoot = Join-Path $repo 'mods/omp-resume'
+$packageRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$checkoutRoot = [IO.Path]::GetFullPath((Join-Path $packageRoot '..'))
+$installer = Join-Path $packageRoot 'install.ps1'
+$sourceRoot = Join-Path $packageRoot 'mods/omp-resume'
 $pwsh = if ($IsWindows) { Join-Path $PSHOME 'pwsh.exe' } else { Join-Path $PSHOME 'pwsh' }
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('herdr-omp-resume-install-' + [guid]::NewGuid().ToString('N'))
 $fakeHome = Join-Path $sandbox 'fake-home'
@@ -233,9 +234,11 @@ try {
   $sourceMain = Join-Path $sourceRoot 'main.js'
   $sourceHash = (Get-FileHash -LiteralPath $sourceMain -Algorithm SHA256).Hash
   $boundaryOmp = Join-Path $sandbox 'boundary-omp'
-  $result = Invoke-Installer -Arguments @('-AppHome', $repo, '-OmpAgentHome', $boundaryOmp)
-  Assert-True ($result.ExitCode -ne 0) "installing into the repository must be refused. Output:`n$($result.Output)"
-  Assert-True ($result.Output -match 'repository') 'boundary refusal must mention the repository'
+  foreach ($insideCheckout in @($packageRoot, $checkoutRoot)) {
+    $result = Invoke-Installer -Arguments @('-AppHome', $insideCheckout, '-OmpAgentHome', $boundaryOmp, '-WhatIf')
+    Assert-True ($result.ExitCode -ne 0) "installing into '$insideCheckout' must be refused. Output:`n$($result.Output)"
+    Assert-True ($result.Output -match 'inside the collection checkout') 'boundary refusal must mention the checkout'
+  }
   Assert-Equal $sourceHash (Get-FileHash -LiteralPath $sourceMain -Algorithm SHA256).Hash 'boundary refusal must not modify source files'
   Assert-True (-not (Test-Path -LiteralPath $boundaryOmp)) 'boundary refusal must not create targets'
 
