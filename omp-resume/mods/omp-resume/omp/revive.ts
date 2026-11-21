@@ -23,7 +23,14 @@ const ABSOLUTE = /^(?:[a-z]:[\\/]|\/|\\\\)/i;
 
 // Session lifecycle events, never session_shutdown: the mod removes a session
 // when its agent/pane closes, so /restart and a crashing core keep the label.
-const EVENTS = ["session_start", "session_switch", "session_branch", "session_tree", "agent_end", "turn_end"];
+const EVENTS = [
+  "session_start",
+  "session_switch",
+  "session_branch",
+  "session_tree",
+  "agent_end",
+  "turn_end",
+];
 
 type Run = (args: string[]) => Promise<void>;
 
@@ -58,7 +65,8 @@ function nonInteractive(argv: readonly string[]): boolean {
     const arg = argv[index];
     if (arg === "--") return false;
     if (arg === "--print" || arg === "-p" || arg === "--no-session") return true;
-    const mode = arg === "--mode" ? argv[++index] : arg.startsWith("--mode=") ? arg.slice(7) : undefined;
+    const mode =
+      arg === "--mode" ? argv[++index] : arg.startsWith("--mode=") ? arg.slice(7) : undefined;
     if (mode && mode !== "text") return true;
   }
   return false;
@@ -81,7 +89,8 @@ function activeProfile(argv: readonly string[]): string | null {
     }
   }
   const name = (explicit ?? process.env.OMP_PROFILE)?.trim();
-  if (!name || name === "default" || name === "." || name === ".." || name.endsWith(".")) return null;
+  if (!name || name === "default" || name === "." || name === ".." || name.endsWith("."))
+    return null;
   return PROFILE.test(name) && !RESERVED.test(name) ? name : null;
 }
 
@@ -109,7 +118,12 @@ async function runHc(args: string[]): Promise<void> {
  * default export, which uses `HC_TERMINAL_ID`, real argv and the real hc.
  */
 export function createHerdrResume(
-  options: { terminalId?: string; argv?: readonly string[]; run?: Run; warn?: (message: string) => void } = {},
+  options: {
+    terminalId?: string;
+    argv?: readonly string[];
+    run?: Run;
+    warn?: (message: string) => void;
+  } = {},
 ) {
   let queue = Promise.resolve();
   let lastQueued: string | undefined;
@@ -126,14 +140,18 @@ export function createHerdrResume(
       const warned = new Set<string>();
       const warn = (message: string) => {
         if (options.warn) {
-          try { options.warn(message); } catch {}
+          try {
+            options.warn(message);
+          } catch {}
           return;
         }
         try {
           pi.logger?.warn?.(message);
           return;
         } catch {}
-        try { console.warn(message); } catch {}
+        try {
+          console.warn(message);
+        } catch {}
       };
       const warnOnce = (key: string, message: string) => {
         if (warned.has(key)) return;
@@ -146,8 +164,10 @@ export function createHerdrResume(
         try {
           metadata = snapshot(ctx as Context, argv);
         } catch (error) {
-          warnOnce(`invalid:${(error as Error).message}`,
-            `herdr omp-resume: cannot publish ${LABEL} on ${terminalId}: ${(error as Error).message}`);
+          warnOnce(
+            `invalid:${(error as Error).message}`,
+            `herdr omp-resume: cannot publish ${LABEL} on ${terminalId}: ${(error as Error).message}`,
+          );
           return;
         }
         if (!metadata) return;

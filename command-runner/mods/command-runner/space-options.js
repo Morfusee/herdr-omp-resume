@@ -20,11 +20,13 @@ export function spaceLocations(spaces, panes) {
     const id = spaceByTab.get(pane.tab);
     if (id !== undefined && pane.cwd && !live.has(id)) live.set(id, pane.cwd);
   }
-  return new Map(spaces.map(space => {
-    const machine = space.machine ?? null;
-    const cwd = live.get(space.id) ?? space.folder ?? "";
-    return [space.id, { machine, cwd, key: JSON.stringify([machine, cwd]) }];
-  }));
+  return new Map(
+    spaces.map((space) => {
+      const machine = space.machine ?? null;
+      const cwd = live.get(space.id) ?? space.folder ?? "";
+      return [space.id, { machine, cwd, key: JSON.stringify([machine, cwd]) }];
+    }),
+  );
 }
 
 /**
@@ -36,9 +38,17 @@ export function spaceLocations(spaces, panes) {
 export async function readSpaceRepo({ machine, cwd }, exec) {
   if (!cwd) return null;
   try {
-    const { code, stdout } = await exec("git", [
-      "rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir", "--is-inside-work-tree",
-    ], { cwd, on: machine });
+    const { code, stdout } = await exec(
+      "git",
+      [
+        "rev-parse",
+        "--path-format=absolute",
+        "--absolute-git-dir",
+        "--git-common-dir",
+        "--is-inside-work-tree",
+      ],
+      { cwd, on: machine },
+    );
     if (code !== 0) return null;
     const lines = stdout.replace(/\r?\n$/, "").split(/\r?\n/);
     const [gitDir, commonDir, inside] = lines;
@@ -57,7 +67,7 @@ export async function readSpaceRepo({ machine, cwd }, exec) {
  * @returns {SpaceOption[]}
  */
 export function groupSpaceOptions(spaces, locations, repoByLocation) {
-  const entries = spaces.map(space => {
+  const entries = spaces.map((space) => {
     const location = locations.get(space.id);
     const git = location && repoByLocation.get(location.key);
     return { space, location, git };
@@ -78,9 +88,9 @@ export function groupSpaceOptions(spaces, locations, repoByLocation) {
       roots.push([space.id, space.name, detail]);
     } else {
       let rows = children.get(parent.id);
-      if (!rows) children.set(parent.id, rows = []);
+      if (!rows) children.set(parent.id, (rows = []));
       rows.push([space.id, space.name, `${parent.name} · ${detail}`, parent.name]);
     }
   }
-  return roots.flatMap(row => [row, ...(children.get(row[0]) ?? [])]);
+  return roots.flatMap((row) => [row, ...(children.get(row[0]) ?? [])]);
 }

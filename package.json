@@ -1,0 +1,13 @@
+{
+  "name": "herdr-mods",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "oxfmt --write \"**/*.{js,mjs,ts,json}\"",
+    "format:check": "oxfmt --check \"**/*.{js,mjs,ts,json}\""
+  },
+  "devDependencies": {
+    "oxfmt": "0.79.0"
+  },
+  "packageManager": "pnpm@10.34.6"
+}

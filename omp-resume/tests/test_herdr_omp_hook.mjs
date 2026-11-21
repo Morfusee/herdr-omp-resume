@@ -15,14 +15,23 @@ function fakePi() {
   const warnings = [];
   return {
     warnings,
-    on(event, handler) { handlers.set(event, handler); },
-    logger: { warn: message => warnings.push(message) },
-    emit(event, ctx) { handlers.get(event)?.({}, ctx); },
+    on(event, handler) {
+      handlers.set(event, handler);
+    },
+    logger: { warn: (message) => warnings.push(message) },
+    emit(event, ctx) {
+      handlers.get(event)?.({}, ctx);
+    },
   };
 }
 
-function context({ id = sessionA, file = `C:/sessions/${id}.jsonl`, cwd = "C:/project",
-  hasUI = true, kind = "main" } = {}) {
+function context({
+  id = sessionA,
+  file = `C:/sessions/${id}.jsonl`,
+  cwd = "C:/project",
+  hasUI = true,
+  kind = "main",
+} = {}) {
   return {
     hasUI,
     agent: { kind },
@@ -46,8 +55,10 @@ function install(pi, options = {}) {
   const hook = createHerdrResume({
     terminalId: "t1",
     argv: [],
-    run: async args => { calls.push(args); },
-    warn: message => pi.warnings.push(message),
+    run: async (args) => {
+      calls.push(args);
+    },
+    warn: (message) => pi.warnings.push(message),
     ...options,
   });
   hook.install(pi);
@@ -58,7 +69,12 @@ function install(pi, options = {}) {
 {
   const pi = fakePi();
   const calls = [];
-  const hook = createHerdrResume({ argv: [], run: async args => { calls.push(args); } });
+  const hook = createHerdrResume({
+    argv: [],
+    run: async (args) => {
+      calls.push(args);
+    },
+  });
   hook.install(pi);
   pi.emit("session_start", context());
   await hook.flush();
@@ -76,7 +92,14 @@ function install(pi, options = {}) {
 }
 
 // Explicit launch arguments refuse even when ctx.hasUI lies (rpc-ui has a UI).
-for (const argv of [["--print"], ["-p"], ["--no-session"], ["--mode", "json"], ["--mode=rpc"], ["--mode", "rpc-ui"]]) {
+for (const argv of [
+  ["--print"],
+  ["-p"],
+  ["--no-session"],
+  ["--mode", "json"],
+  ["--mode=rpc"],
+  ["--mode", "rpc-ui"],
+]) {
   const pi = fakePi();
   const { hook, calls } = install(pi, { argv });
   pi.emit("session_start", context());
@@ -89,7 +112,11 @@ for (const argv of [["--mode", "text"], ["--mode=text"]]) {
   const { hook, calls } = install(pi, { argv });
   pi.emit("session_start", context());
   await hook.flush();
-  assert.equal(label(calls[0]).sessionId, sessionA, "explicit interactive text mode must still register");
+  assert.equal(
+    label(calls[0]).sessionId,
+    sessionA,
+    "explicit interactive text mode must still register",
+  );
 }
 
 // A nested omp inherits OMPCODE=1 and must not report over its parent's terminal.
@@ -214,8 +241,12 @@ for (const argv of [["--mode", "text"], ["--mode=text"]]) {
   const hook = createHerdrResume({
     terminalId: "t1",
     argv: [],
-    run: async args => { calls.push(args); started(); await gate; },
-    warn: message => pi.warnings.push(message),
+    run: async (args) => {
+      calls.push(args);
+      started();
+      await gate;
+    },
+    warn: (message) => pi.warnings.push(message),
   });
   hook.install(pi);
   pi.emit("session_start", context());
@@ -236,8 +267,11 @@ for (const argv of [["--mode", "text"], ["--mode=text"]]) {
   const hook = createHerdrResume({
     terminalId: "t1",
     argv: [],
-    run: async () => { attempts++; throw new Error("hc is not running"); },
-    warn: message => pi.warnings.push(message),
+    run: async () => {
+      attempts++;
+      throw new Error("hc is not running");
+    },
+    warn: (message) => pi.warnings.push(message),
   });
   hook.install(pi);
   pi.emit("session_start", context());

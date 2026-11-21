@@ -24,4 +24,8 @@ Read the installed Herdr guide at ~/.config/herdr-app/AGENTS.md, then add this m
 
 Updating an existing clone of `herdr-omp-resume`? Pull the latest `main`, then run `pwsh -NoProfile -File ./omp-resume/install.ps1` from the checkout root. The installed mod and hook names have not changed.
 
+## Development
+
+From the repo root, run `pnpm install --frozen-lockfile`, then `pnpm format` to format JavaScript, TypeScript, and JSON in both mods. Use `pnpm format:check` to check without writing. Neither mod needs pnpm or oxfmt at runtime.
+
 [MIT license](LICENSE). OMP Resume also includes its [upstream MIT notice](omp-resume/mods/omp-resume/LICENSE).
