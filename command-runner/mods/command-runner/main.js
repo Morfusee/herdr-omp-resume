@@ -8,6 +8,7 @@ const KEY = "command-runner.commands";
 const saved = () => shared(KEY) ?? ["pnpm dev"];
 const fields = { command: "Command", space: "Space", tab: "Tab", terminal: "Terminal" };
 const forTab = (list, id) => list.filter(p => p.tab === id && p.terminal);
+const agentLabel = app => app === "omp" ? "OMP" : app;
 const menuContext = "CommandRunnerOptions";
 let menuKeysBound = false;
 const missing = Symbol("missing selection");
@@ -54,7 +55,7 @@ export default class CommandRunner extends View {
     this.search.on("submit", (_, cx) => this.acceptMatch(cx));
     this.rows = [this.newRow(saved()[0] ?? "", cx)];
     if (_props?.overlay) (this.rows[0].command ? this.rows[0].focus.command : this.formFocus).focus();
-    this.input = InputState.new({ placeholder: "Shell command, e.g. pnpm dev" });
+    this.input = InputState.new({ placeholder: "Command, e.g. pnpm dev or /restart" });
     this.input.on("change", (_, cx) => cx.notify());
     this.input.on("submit", (_, cx) => { if (this.manage) this.save(); cx.notify(); });
     this.repoByLocation = new Map();
@@ -64,7 +65,7 @@ export default class CommandRunner extends View {
 
   newRow(command, cx) {
     const focus = Object.fromEntries(Object.keys(fields).map(key => [key, cx.focus_handle()]));
-    return { id: ++this.serial, command, space: "", tab: "", terminal: "", result: "", sent: false, focus };
+    return { id: ++this.serial, command, space: "", tab: "", terminal: "", agent: null, result: "", sent: false, focus };
   }
 
   save() {
@@ -78,9 +79,10 @@ export default class CommandRunner extends View {
   choose(row, key, value) {
     row[key] = value;
     if (key === "space") row.tab = "";
-    if (key === "space" || key === "tab") {
+    if (key !== "command") {
       const candidates = forTab(panes(), row.tab);
-      row.terminal = candidates.length === 1 ? candidates[0].terminal : "";
+      if (key !== "terminal") row.terminal = candidates.length === 1 ? candidates[0].terminal : "";
+      row.agent = candidates.find(p => p.terminal === row.terminal)?.app ?? null;
     }
     row.sent = false;
     row.result = "";
@@ -134,7 +136,17 @@ export default class CommandRunner extends View {
     if (!space.tabs.some(t => t.id === r.tab)) return r.tab ? "Tab closed. Choose another tab." : missing;
     const pp = forTab(ps, r.tab);
     if (!pp.length) return "This tab has no terminal.";
-    if (!pp.some(p => p.terminal === r.terminal)) return r.terminal ? "Terminal closed. Choose another terminal." : missing;
+    const pane = pp.find(p => p.terminal === r.terminal);
+    if (!pane) return r.terminal ? "Terminal closed. Choose another terminal." : missing;
+    if ((pane.app ?? null) !== r.agent) return "The program changed. Select this target again.";
+    if (r.agent) {
+      const report = terminals().find(t => t.address === r.terminal)?.report;
+      if (report?.app !== r.agent) return "Agent identity unavailable. Check the target.";
+      const state = report.state === "idle" ? pane.status : report.state;
+      if (state === "done") return `${agentLabel(r.agent)} reports done, not idle. Enter the command in the agent directly.`;
+      if (state !== "idle") return `${agentLabel(r.agent)} reports ${state ?? "unknown"}. Sending requires idle.`;
+    }
+    if (!r.agent && r.command === "/restart") return "Select an idle agent for /restart.";
     if (this.rows.some(other => other !== r && other.terminal === r.terminal)) return "This terminal is already in the batch.";
     return "";
   }
@@ -150,7 +162,7 @@ export default class CommandRunner extends View {
           try {
             await dispatch({ ...r }, { hc, spaces, panes, terminals, delay: ms => cx.sleep(ms) });
             r.sent = true;
-            r.result = "Submitted";
+            r.result = r.agent ? `Sent to ${agentLabel(r.agent)}` : "Submitted";
           } catch (e) { r.result = String(e.message ?? e); }
           cx.notify();
         }));
@@ -297,8 +309,10 @@ export default class CommandRunner extends View {
 
   target(r, ss, ps, spaceChoices, problem, t) {
     const pp = this.options(r, "terminal", ss, ps);
-    const message = r.result || (problem !== missing && problem);
-    const color = r.sent ? t.done : r.result === "Checking terminal…" ? t.muted : t.blocked;
+    const route = r.agent ? `Send to ${agentLabel(r.agent)}` : "Run in shell";
+    const message = r.result || (problem === missing ? "" : problem || route);
+    const error = r.result ? r.result !== "Checking terminal…" : problem && problem !== missing;
+    const color = r.sent ? t.done : error ? t.blocked : t.muted;
     return v_flex().flex_none().gap(6)
       .child(h_flex().items_center().gap(8)
         .children(["command", "space", "tab"].map(key => this.field(r, key, this.options(r, key, ss, ps, spaceChoices), t)))
@@ -323,10 +337,10 @@ export default class CommandRunner extends View {
         .child(div().text_size(12).text_color(t.muted).child(subtitle))).child(action);
     if (this.manage) {
       const cmds = saved(), text = this.input.value().trim();
-      return root.child(header("layers", "Saved commands", "Shell commands available to every target.",
+      return root.child(header("layers", "Saved commands", "Shell commands and agent input.",
         button("back", "Back", () => { this.manage = false; }, { glyph: "chevron-left" })))
         .child(h_flex().flex_none().px(18).pt(14).pb(8).gap(8).items_center()
-          .child(Input.new(this.input).accessibility_label("New shell command").flex_1().min_w(0)
+          .child(Input.new(this.input).accessibility_label("New command or agent input").flex_1().min_w(0)
             .h(34).px(10).rounded(6).border_1().border_color(t.input).bg(t.background).font_family(mono())
             .focus(s => s.border_color(t.accent)))
           .child(button("save", "Save command", () => this.save(), { primary: true, disabled: !text || /[\x00-\x1f\x7f]/.test(text) || cmds.includes(text) })))
@@ -355,7 +369,7 @@ export default class CommandRunner extends View {
       .child(h_flex().flex_none().px(18).py(10).gap(8).items_center().bg(t.chrome).border_t(1).border_color(t.border)
         .child(v_flex().flex_1().min_w(0).gap(2)
           .child(div().font_medium().child(pending ? `${ready} of ${pending} ready` : "Batch submitted"))
-          .child(div().text_size(11).text_color(t.muted).child("Known dev servers get one Ctrl+C. Commands wait for a shell.")))
+          .child(div().text_size(11).text_color(t.muted).child("Agents receive text. Only known dev servers get Ctrl+C.")))
         .child(button("close", "Close", () => closeOverlay(props().overlay), { disabled: this.busy }))
         .child(button("run", this.busy ? "Running…" : `Run${pending > 1 ? ` ${pending} targets` : ""}`, cx => this.run(cx), {
           primary: true, disabled: this.busy || !pending || ready !== pending,

@@ -74,11 +74,27 @@ function sameLaunch(a, b) {
   return a.pid === b.pid && a.created_ms === b.created_ms && sameArgs(a.argv, b.argv);
 }
 
-export async function dispatch({ space, tab, terminal, command }, { hc, spaces, panes, terminals, delay }) {
+function agentForeground(fg, app) {
+  const name = app === "claude-code" ? "claude" : app;
+  return Number.isSafeInteger(fg?.pid) && fg.pid > 0 && Array.isArray(fg.argv)
+    && executable(fg.name) === name && executable(fg.argv[0]) === name && !shellName([fg.argv[0]]);
+}
+
+function sameForeground(a, b) {
+  return a.pid === b.pid && sameArgs(a.argv, b.argv);
+}
+
+export async function dispatch({ space, tab, terminal, command, agent }, { hc, spaces, panes, terminals, delay }) {
   if (![space, tab, terminal].every(id => typeof id === "string" && id.trim())) throw new Error("Select a space, tab, and terminal.");
   if (typeof command !== "string" || !command.trim() || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(command)) {
     throw new Error("Use a nonblank, single-line command without control characters.");
   }
+  const toAgent = agent != null;
+  if (toAgent && (typeof agent !== "string" || !agent.trim())) throw new Error("Select a recognized agent.");
+  if (!toAgent && command.trim() === "/restart") throw new Error("Select an idle agent to send /restart.");
+
+  const hasLabels = (item, prefix) => item.labels?.["herdr.space"] === space.slice(prefix.length)
+    && item.labels?.["herdr.tab"] === tab.slice(prefix.length);
 
   function target() {
     const selected = spaces().find(item => item.id === space);
@@ -94,15 +110,26 @@ export async function dispatch({ space, tab, terminal, command }, { hc, spaces, 
     const live = terminals().find(item => item.address === terminal);
     if (live?.state !== "live" || !Number.isSafeInteger(live.pid) || live.pid <= 0
       || !Number.isSafeInteger(live.created_ms) || !Array.isArray(live.argv)) throw new Error("The selected terminal is no longer live.");
-    if (pane.app != null || pane.status != null || live.status != null || live.reported === true || live.template != null) {
+    if (toAgent) {
+      if (pane.app !== agent || live.report?.app !== agent || live.reported !== true) {
+        throw new Error("The selected terminal no longer reports the selected agent.");
+      }
+      if (pane.status !== "idle" || live.status !== "idle" || live.report.state !== "idle") {
+        throw new Error("The selected agent is not idle.");
+      }
+      if (!hasLabels(live, prefix)) throw new Error("The terminal's address or membership changed.");
+      if (!agentForeground(live.foreground, agent)) throw new Error("The selected agent is not in the foreground.");
+    } else if (pane.app != null || pane.status != null || live.status != null || live.reported === true || live.template != null) {
       throw new Error("The selected terminal belongs to an agent.");
     }
     return { pane: pane.pane, prefix, live };
   }
 
   const original = target();
-  const shell = shellName(original.live.argv);
-  if (!shell) throw new Error("The terminal was not launched as a supported interactive shell.");
+  const launch = toAgent ? { pid: original.live.pid, created_ms: original.live.created_ms, argv: original.live.argv.slice() } : original.live;
+  const foreground = toAgent ? { pid: original.live.foreground.pid, argv: original.live.foreground.argv.slice() } : null;
+  const shell = toAgent ? null : shellName(launch.argv);
+  if (!toAgent && !shell) throw new Error("The terminal was not launched as a supported interactive shell.");
 
   async function inspect() {
     const fresh = await invoke(hc, ["get", "--json", "--", terminal]);
@@ -110,10 +137,19 @@ export async function dispatch({ space, tab, terminal, command }, { hc, spaces, 
     const { prefix } = original;
     if (current.pane !== original.pane || current.prefix !== prefix
       || (fresh.address !== terminal && !(prefix && fresh.address === terminal.slice(prefix.length)))
-      || fresh.labels?.["herdr.space"] !== space.slice(prefix.length)
-      || fresh.labels?.["herdr.tab"] !== tab.slice(prefix.length)) throw new Error("The terminal's address or membership changed.");
-    if (fresh.state !== "live" || !sameLaunch(original.live, current.live) || !sameLaunch(original.live, fresh)) {
-      throw new Error("The original shell is no longer live.");
+      || !hasLabels(fresh, prefix)) throw new Error("The terminal's address or membership changed.");
+    if (fresh.state !== "live" || !sameLaunch(launch, current.live) || !sameLaunch(launch, fresh)) {
+      throw new Error(toAgent ? "The original agent terminal is no longer live." : "The original shell is no longer live.");
+    }
+    if (toAgent) {
+      if (fresh.reported !== true || fresh.status?.app !== agent) {
+        throw new Error("The terminal no longer reports the selected agent.");
+      }
+      if (fresh.status.state !== "idle") throw new Error("The selected agent is not idle.");
+      // In particular, Windows can keep an idle report after the agent exits into its shell.
+      if (!agentForeground(fresh.foreground, agent) || !sameForeground(foreground, current.live.foreground)
+        || !sameForeground(foreground, fresh.foreground)) throw new Error("The selected agent's foreground process changed.");
+      return fresh;
     }
     if (fresh.status != null || fresh.reported === true || fresh.template != null) throw new Error("The terminal belongs to an agent.");
     const fg = fresh.foreground;
@@ -135,6 +171,11 @@ export async function dispatch({ space, tab, terminal, command }, { hc, spaces, 
   async function write(args) {
     const result = await invoke(hc, args);
     if (!Number.isSafeInteger(result.turn)) throw new Error(`hc ${args[0]} did not confirm delivery.`);
+  }
+
+  if (toAgent) {
+    await inspect();
+    return write(["send", "--json", "--if", "idle", "--", terminal, command]);
   }
 
   const send = () => write(["send", "--json", "--", terminal, command]);

@@ -35,6 +35,23 @@ function fixture(machine = null) {
   return { row, live, shell, fresh, visible, space, calls, delays, replies, deps };
 }
 
+function agentFixture(machine = null) {
+  const f = fixture(machine);
+  const idle = { app: "omp", state: "idle" };
+  const foreground = machine
+    ? { pid: f.live.pid, name: "omp", argv: ["/usr/local/bin/omp"] }
+    : { pid: 43, name: "omp.exe", argv: ["C:\\tools\\omp.exe"] };
+  Object.assign(f.row, { command: "/restart", agent: "omp" });
+  Object.assign(f.visible[0], { app: "omp", status: "idle" });
+  Object.assign(f.live, { reported: true, status: "idle", report: idle, foreground, labels: f.fresh.labels });
+  Object.assign(f.fresh, { reported: true, status: { ...idle }, foreground: { ...foreground } });
+  if (machine) {
+    f.live.argv = f.fresh.argv = foreground.argv.slice();
+    f.fresh.address = "t7";
+  }
+  return f;
+}
+
 function operations(fixture) {
   return fixture.calls.map(args => args[0]);
 }
@@ -156,4 +173,107 @@ test("surfaces core failures or missing acknowledgments and never retries", asyn
   interrupted.replies.keys = () => ok({});
   await assert.rejects(dispatch(interrupted.row, interrupted.deps), /hc keys did not confirm delivery/);
   assert.deepEqual(writes(interrupted), ["keys"]);
+});
+
+test("sends literal /restart once to the selected idle local or remote agent", async () => {
+  for (const machine of [null, "work"]) {
+    const f = agentFixture(machine);
+    assert.equal(await dispatch(f.row, f.deps), undefined);
+    assert.deepEqual(f.calls, [
+      ["get", "--json", "--", f.row.terminal],
+      ["send", "--json", "--if", "idle", "--", f.row.terminal, "/restart"],
+    ]);
+    assert.deepEqual(f.delays, []);
+  }
+});
+
+test("requires every view of the agent to agree on the selected app and idle state", async () => {
+  for (const [change, error] of [
+    [f => { f.row.agent = ""; }, /recognized agent/],
+    [f => { f.row.agent = "pi"; }, /selected agent/],
+    [f => { f.visible[0].app = null; }, /selected agent/],
+    [f => { f.visible[0].status = "blocked"; }, /not idle/],
+    [f => { f.live.status = "working"; }, /not idle/],
+    [f => { f.live.report.state = "done"; }, /not idle/],
+    [f => { f.live.report.app = "codex"; }, /selected agent/],
+    [f => { f.live.reported = false; }, /selected agent/],
+    [f => { f.fresh.status.app = "codex"; }, /selected agent/],
+    [f => { f.fresh.status.state = "blocked"; }, /not idle/],
+    [f => { f.fresh.status.state = "working"; }, /not idle/],
+    [f => { f.fresh.status.state = "unknown"; }, /not idle/],
+    [f => { f.fresh.status = null; }, /selected agent/],
+    [f => { f.fresh.reported = false; }, /selected agent/],
+  ]) {
+    const f = agentFixture();
+    change(f);
+    await assert.rejects(dispatch(f.row, f.deps), error);
+    assert.deepEqual(writes(f), []);
+  }
+});
+
+test("refuses stale agent reports when the foreground is a shell or unknown process", async () => {
+  for (const foreground of [null, { pid: 43, name: "vim", argv: ["vim"] }, { pid: 43, name: "omp.exe", argv: ["pwsh.exe"] }]) {
+    const f = agentFixture();
+    f.fresh.foreground = foreground;
+    await assert.rejects(dispatch(f.row, f.deps), /foreground/);
+    assert.deepEqual(writes(f), []);
+  }
+  for (const view of ["live", "fresh"]) {
+    const f = agentFixture();
+    f[view].foreground = f.shell;
+    await assert.rejects(dispatch(f.row, f.deps), /foreground/);
+    assert.deepEqual(writes(f), []);
+  }
+});
+
+test("rechecks selected pane, machine, labels, launch, and foreground after requesting fresh data", async () => {
+  for (const [change, error] of [
+    [f => { f.visible[0].pane = "work/p2"; }, /membership changed/],
+    [f => { f.visible[0].tab = "work/tb2"; }, /no longer in that tab/],
+    [f => { f.visible[0].app = "codex"; }, /selected agent/],
+    [f => { f.visible[0].status = "working"; }, /not idle/],
+    [f => { f.space.machine = "other"; }, /machine address/],
+    [f => { f.fresh.address = "other/t7"; }, /membership changed/],
+    [f => { f.fresh.labels = { ...f.fresh.labels, "herdr.tab": "tb2" }; }, /membership changed/],
+    [f => { f.live.labels = { ...f.live.labels, "herdr.space": "sp2" }; }, /membership changed/],
+    [f => { f.fresh.state = "finished"; }, /no longer live/],
+    [f => { f.live.pid = f.fresh.pid = 44; }, /no longer live/],
+    [f => { f.fresh.created_ms += 1; }, /no longer live/],
+    [f => { f.live.argv.push("--changed"); }, /no longer live/],
+    [f => { f.fresh.foreground.pid += 1; }, /foreground process changed/],
+    [f => { f.live.foreground.argv.push("--changed"); }, /foreground process changed/],
+  ]) {
+    const f = agentFixture("work");
+    f.replies.get = () => { change(f); return ok(f.fresh); };
+    await assert.rejects(dispatch(f.row, f.deps), error);
+    assert.deepEqual(writes(f), []);
+  }
+});
+
+test("never dispatches a shell selection through the agent path or sends /restart to a shell", async () => {
+  for (const agent of [null, undefined]) {
+    const shell = fixture();
+    await assert.rejects(dispatch({ ...shell.row, command: "/restart", agent }, shell.deps), /Select an idle agent/);
+    assert.deepEqual(shell.calls, []);
+
+    const f = agentFixture();
+    await assert.rejects(dispatch({ ...f.row, command: "echo safe", agent }, f.deps), /belongs to an agent/);
+    assert.deepEqual(f.calls, []);
+  }
+});
+
+test("surfaces a guarded send refusal or uncertain delivery without retrying", async () => {
+  for (const [reply, error] of [
+    [() => ({ code: 9, stdout: "", stderr: '{"error":{"message":"program blocked"}}' }), /program blocked/],
+    [() => ({ code: 10, stdout: "", stderr: '{"error":{"message":"expected idle"}}' }), /expected idle/],
+    [() => { throw new Error("connection lost"); }, /connection lost/],
+    [() => ok({}), /did not confirm delivery/],
+  ]) {
+    const f = agentFixture("work");
+    f.replies.send = reply;
+    await assert.rejects(dispatch(f.row, f.deps), error);
+    assert.deepEqual(operations(f), ["get", "send"]);
+    assert.deepEqual(f.calls[1], ["send", "--json", "--if", "idle", "--", f.row.terminal, "/restart"]);
+    assert.deepEqual(f.delays, []);
+  }
 });
